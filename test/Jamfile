@@ -44,6 +44,7 @@ unit-test http-tests :
     http/basic_dynabuf_body.cpp
     http/basic_headers.cpp
     http/basic_parser_v1.cpp
+    http/basic_uri_parser.cpp
     http/body_type.cpp
     http/concepts.cpp
     http/empty_body.cpp

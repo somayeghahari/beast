@@ -12,6 +12,7 @@ add_executable (http-tests
     basic_dynabuf_body.cpp
     basic_headers.cpp
     basic_parser_v1.cpp
+    basic_uri_parser.cpp
     body_type.cpp
     concepts.cpp
     empty_body.cpp
