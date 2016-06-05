@@ -161,7 +161,8 @@ increment()
         pi_.it = pi_.end;
         pi_.begin = pi_.end;
     }
-    else if(pi_.v.second.front() == '"')
+    else if(! pi_.v.second.empty() &&
+        pi_.v.second.front() == '"')
     {
         s_ = unquote(pi_.v.second);
         pi_.v.second = boost::string_ref{

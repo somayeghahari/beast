@@ -233,6 +233,19 @@ skip_ows(FwdIt& it, FwdIt const& end)
     }
 }
 
+template<class FwdIt>
+void
+skip_token(FwdIt& it, FwdIt const& end)
+{
+    while(it != end)
+    {
+        auto const c = *it;
+        if(! is_tchar(c))
+            break;
+        ++it;
+    }
+}
+
 inline
 boost::string_ref
 trim(boost::string_ref const& s)
@@ -279,19 +292,12 @@ param_iter::
 increment()
 {
 /*
-    ext-list    = *( "," OWS ) ext *( OWS "," [ OWS ext ] )
-    ext         = token param-list
-    param-list  = *( OWS ";" OWS param )
-    param       = token OWS "=" OWS ( token / quoted-string )
-            
-    quoted-string = DQUOTE *( qdtext / quoted-pair ) DQUOTE
-    qdtext = HTAB / SP / "!" / %x23-5B ; '#'-'[' / %x5D-7E ; ']'-'~' / obs-text
-    quoted-pair = "\" ( HTAB / SP / VCHAR / obs-text )
-    obs-text = %x80-FF
-
-    Example:
-        chunked;a=b;i=j,gzip;windowBits=12
-        x,y
+    param-list      = *( OWS ";" OWS param )
+    param           = token OWS [ "=" OWS ( token / quoted-string ) ]        
+    quoted-string   = DQUOTE *( qdtext / quoted-pair ) DQUOTE
+    qdtext          = HTAB / SP / "!" / %x23-5B ; '#'-'[' / %x5D-7E ; ']'-'~' / obs-text
+    quoted-pair     = "\" ( HTAB / SP / VCHAR / obs-text )
+    obs-text        = %x80-FF
 */
     auto const err =
         [&]
@@ -318,20 +324,23 @@ increment()
     {
         ++it;
         if(it == end)
-            return err();
+            break;
         if(! detail::is_tchar(*it))
             break;
     }
     auto const p1 = it;
+    v.first = { &*p0, static_cast<std::size_t>(p1 - p0) };
     detail::skip_ows(it, end);
     if(it == end)
-        return err();
+        return;
+    if(*it == ';')
+        return;
     if(*it != '=')
         return err();
     ++it;
     detail::skip_ows(it, end);
     if(it == end)
-        return err();
+        return;
     if(*it == '"')
     {
         // quoted-string
@@ -354,7 +363,6 @@ increment()
             if(! detail::is_qpchar(c))
                 return err();
         }
-        v.first = { &*p0, static_cast<std::size_t>(p1 - p0) };
         v.second = { &*p2, static_cast<std::size_t>(it - p2) };
     }
     else
@@ -371,7 +379,6 @@ increment()
             if(! detail::is_tchar(*it))
                 break;
         }
-        v.first = { &*p0, static_cast<std::size_t>(p1 - p0) };
         v.second = { &*p2, static_cast<std::size_t>(it - p2) };
     }
 }
