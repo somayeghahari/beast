@@ -7,7 +7,7 @@ project (Beast)
 set_property (GLOBAL PROPERTY USE_FOLDERS ON)
 
 if (WIN32)
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP /W4 /wd4100 /D_SCL_SECURE_NO_WARNINGS=1 /D_CRT_SECURE_NO_WARNINGS=1")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP /W4 /wd4100 /wd4131 /wd4127 /wd4244 /D_SCL_SECURE_NO_WARNINGS=1 /D_CRT_SECURE_NO_WARNINGS=1")
     set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SAFESEH:NO")
 else()
     set(Boost_USE_STATIC_LIBS ON)
@@ -55,6 +55,29 @@ file(GLOB_RECURSE BEAST_INCLUDES
     ${PROJECT_SOURCE_DIR}/extras/beast/*.ipp
 )
 
+set (ZLIB_SOURCES
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/zconf.h
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/zlib.h
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/crc32.h
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/deflate.h
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/inffast.h
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/inffixed.h
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/inflate.h
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/inftrees.h
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/trees.h
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/zutil.h
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/adler32.c
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/compress.c
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/crc32.c
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/deflate.c
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/inflate.c
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/infback.c
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/inftrees.c
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/inffast.c
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/trees.c
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/uncompr.c
+    ${PROJECT_SOURCE_DIR}/include/beast/core/impl/zlib/zutil.c
+)
 add_subdirectory (examples)
 add_subdirectory (test)
 add_subdirectory (test/core)
