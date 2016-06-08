@@ -27,6 +27,7 @@ WebSocket:
 * Use close_code::no_code instead of close_code::none
 * Make request_type, response_type public APIs,
   use in stream member function signatures
+* Study use of stream::reset() and see if it is removable
 
 HTTP:
 * Define Parser concept in HTTP
