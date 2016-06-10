@@ -608,8 +608,7 @@ write(ConstBufferSequence const& bs, error_code& ec)
     auto remain = buffer_size(cb);
     for(;;)
     {
-        auto const n =
-            detail::clamp(remain, wr_frag_size_);
+        auto const n = remain;
         remain -= n;
         auto const fin = remain <= 0;
         write_frame(fin, prepare_buffers(n, cb), ec);

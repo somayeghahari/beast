@@ -168,13 +168,9 @@ public:
 
     /// Set the automatic fragment size option
     void
-    set_option(auto_fragment_size const& o)
+    set_option(auto_fragment const& o)
     {
-        if(o.value <= 0)
-            wr_frag_size_ =
-                std::numeric_limits<std::size_t>::max();
-        else
-            wr_frag_size_ = o.value;
+        wr_autofrag_ = o.value;
     }
 
     /// Set the decorator used for HTTP messages
@@ -1268,7 +1264,7 @@ public:
 
         The current setting of the @ref message_type option controls
         whether the message opcode is set to text or binary. If the
-        @ref auto_fragment_size option is set, the message will be split
+        @ref auto_fragment option is set, the message will be split
         into one or more frames as necessary. The actual payload contents
         sent may be transformed as per the WebSocket protocol settings.
 
@@ -1303,7 +1299,7 @@ public:
 
         The current setting of the @ref message_type option controls
         whether the message opcode is set to text or binary. If the
-        @ref auto_fragment_size option is set, the message will be split
+        @ref auto_fragment option is set, the message will be split
         into one or more frames as necessary. The actual payload contents
         sent may be transformed as per the WebSocket protocol settings.
 
@@ -1345,7 +1341,7 @@ public:
 
         The current setting of the @ref message_type option controls
         whether the message opcode is set to text or binary. If the
-        @ref auto_fragment_size option is set, the message will be split
+        @ref auto_fragment option is set, the message will be split
         into one or more frames as necessary. The actual payload contents
         sent may be transformed as per the WebSocket protocol settings.
 

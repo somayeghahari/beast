@@ -149,7 +149,7 @@ public:
     void testOptions()
     {
         stream<socket_type> ws(ios_);
-        ws.set_option(auto_fragment_size{2048});
+        ws.set_option(auto_fragment{true});
         ws.set_option(decorate(identity{}));
         ws.set_option(keep_alive{false});
         ws.set_option(write_buffer_size{2048});
@@ -158,7 +158,7 @@ public:
         ws.set_option(read_message_max{1 * 1024 * 1024});
         try
         {
-            ws.set_option(write_buffer_size{0});
+            ws.set_option(write_buffer_size{7});
             fail();
         }
         catch(std::exception const&)
@@ -840,7 +840,7 @@ public:
                 ws.handshake("localhost", "/");
 
                 // send message
-                ws.set_option(auto_fragment_size(0));
+                ws.set_option(auto_fragment{false});
                 ws.set_option(message_type(opcode::text));
                 ws.write(sbuf("Hello"));
                 {
@@ -911,16 +911,18 @@ public:
                 ws.set_option(pong_callback{});
 
                 // send auto fragmented message
-                ws.set_option(auto_fragment_size(3));
-                ws.write(sbuf("Hello"));
+                ws.set_option(auto_fragment{true});
+                ws.set_option(write_buffer_size{8});
+                ws.write(sbuf("Now is the time for all good men"));
                 {
                     // receive echoed message
                     opcode op;
                     streambuf sb;
                     ws.read(op, sb);
-                    expect(to_string(sb.data()) == "Hello");
+                    expect(to_string(sb.data()) == "Now is the time for all good men");
                 }
-                ws.set_option(auto_fragment_size(0));
+                ws.set_option(auto_fragment{false});
+                ws.set_option(write_buffer_size{4096});
 
                 // send message with write buffer limit
                 {
@@ -1077,7 +1079,7 @@ public:
                     throw system_error{ec};
 
                 // send message
-                ws.set_option(auto_fragment_size(0));
+                ws.set_option(auto_fragment{false});
                 ws.set_option(message_type(opcode::text));
                 ws.async_write(sbuf("Hello"), do_yield[ec]);
                 if(ec)
@@ -1171,8 +1173,9 @@ public:
                 }
 
                 // send auto fragmented message
-                ws.set_option(auto_fragment_size(3));
-                ws.async_write(sbuf("Hello"), do_yield[ec]);
+                ws.set_option(auto_fragment{true});
+                ws.set_option(write_buffer_size{8});
+                ws.async_write(sbuf("Now is the time for all good men"), do_yield[ec]);
                 {
                     // receive echoed message
                     opcode op;
@@ -1180,9 +1183,10 @@ public:
                     ws.async_read(op, sb, do_yield[ec]);
                     if(ec)
                         throw system_error{ec};
-                    expect(to_string(sb.data()) == "Hello");
+                    expect(to_string(sb.data()) == "Now is the time for all good men");
                 }
-                ws.set_option(auto_fragment_size(0));
+                ws.set_option(auto_fragment{false});
+                ws.set_option(write_buffer_size{4096});
 
                 // send message with mask buffer limit
                 {

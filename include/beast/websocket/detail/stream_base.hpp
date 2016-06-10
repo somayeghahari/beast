@@ -75,8 +75,7 @@ protected:
     bool keep_alive_ = false;           // close on failed upgrade
     std::size_t rd_msg_max_ =
         16 * 1024 * 1024;               // max message size
-    std::size_t
-        wr_frag_size_ = 16 * 1024;      // size of auto-fragments
+    bool wr_autofrag_ = true;           // auto fragment
     std::size_t wr_buf_size_ = 4096;    // mask buffer size
     opcode wr_opcode_ = opcode::text;   // outgoing message type
     pong_cb pong_cb_;                   // pong callback
@@ -99,6 +98,12 @@ protected:
     invokable rd_op_;                   // invoked after write completes
     invokable wr_op_;                   // invoked after read completes
     close_reason cr_;                   // set from received close frame
+
+    struct wr_t
+    {
+    };
+
+    wr_t wr_;
 
     stream_base(stream_base&&) = default;
     stream_base(stream_base const&) = delete;
