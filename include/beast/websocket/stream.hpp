@@ -1395,11 +1395,6 @@ public:
         the @ref message_type option. The actual payload sent
         may be transformed as per the WebSocket protocol settings.
 
-        The call returns the amount of the input buffer sequence
-        consumed, which may be less than the full size of the input
-        buffers. In this case, the caller is responsible for making
-        additional calls to @ref write_frame to finish the payload.
-
         @param fin `true` if this is the last frame in the message.
 
         @param buffers The input buffer sequence holding the data to write.
@@ -1409,7 +1404,7 @@ public:
         @throws boost::system::system_error Thrown on failure.
     */
     template<class ConstBufferSequence>
-    std::size_t
+    void
     write_frame(bool fin, ConstBufferSequence const& buffers);
 
     /** Write partial message data on the stream.
@@ -1432,11 +1427,6 @@ public:
         the @ref message_type option. The actual payload sent
         may be transformed as per the WebSocket protocol settings.
 
-        The call returns the amount of the input buffer sequence
-        consumed, which may be less than the full size of the input
-        buffers. In this case, the caller is responsible for making
-        additional calls to @ref write_frame to finish the payload.
-
         @param fin `true` if this is the last frame in the message.
 
         @param buffers The input buffer sequence holding the data to write.
@@ -1446,7 +1436,7 @@ public:
         @return The number of bytes consumed in the input buffers.
     */
     template<class ConstBufferSequence>
-    std::size_t
+    void
     write_frame(bool fin,
         ConstBufferSequence const& buffers, error_code& ec);
 

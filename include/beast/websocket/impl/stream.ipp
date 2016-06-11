@@ -596,25 +596,14 @@ template<class NextLayer>
 template<class ConstBufferSequence>
 void
 stream<NextLayer>::
-write(ConstBufferSequence const& bs, error_code& ec)
+write(ConstBufferSequence const& buffers, error_code& ec)
 {
     static_assert(is_SyncStream<next_layer_type>::value,
         "SyncStream requirements not met");
     static_assert(beast::is_ConstBufferSequence<
         ConstBufferSequence>::value,
             "ConstBufferSequence requirements not met");
-    using boost::asio::buffer_size;
-    consuming_buffers<ConstBufferSequence> cb(bs);
-    auto remain = buffer_size(cb);
-    do
-    {
-        auto const used = write_frame(true, cb, ec);
-        if(ec)
-            return;
-        cb.consume(used);
-        remain -= used;
-    }
-    while(remain > 0);
+    write_frame(true, buffers, ec);
 }
 
 template<class NextLayer>
@@ -638,7 +627,7 @@ async_write(ConstBufferSequence const& bs, WriteHandler&& handler)
 
 template<class NextLayer>
 template<class ConstBufferSequence>
-std::size_t
+void
 stream<NextLayer>::
 write_frame(bool fin, ConstBufferSequence const& buffers)
 {
@@ -648,10 +637,9 @@ write_frame(bool fin, ConstBufferSequence const& buffers)
         ConstBufferSequence>::value,
             "ConstBufferSequence requirements not met");
     error_code ec;
-    auto const n = write_frame(fin, buffers, ec);
+    write_frame(fin, buffers, ec);
     if(ec)
         throw system_error{ec};
-    return n;
 }
 
 /*
@@ -661,7 +649,6 @@ if(compress)
         if(mask)
             apply mask to write buffer
         write frame header, write_buffer as one frame
- 
 else if(auto-fragment)
     if(fin || write_buffer_avail + buffers size == write_buffer_size)
         if(mask)
@@ -671,7 +658,6 @@ else if(auto-fragment)
 
         else:
             write frame header, write buffer, and buffers as one frame
-
     else:
         append buffers to write buffer
 else if(mask)
@@ -682,13 +668,12 @@ else if(mask)
         copy buffers to write_buffer
         apply mask to write_buffer
         write write_buffer in a single call
-
 else
         write frame header, buffers as one frame
 */
 template<class NextLayer>
 template<class ConstBufferSequence>
-std::size_t
+void
 stream<NextLayer>::
 write_frame(bool fin,
     ConstBufferSequence const& buffers, error_code& ec)
@@ -705,55 +690,66 @@ write_frame(bool fin,
     if(! wr_.cont)
         wr_prepare(compress);
     detail::frame_header fh;
-    detail::fh_streambuf fh_buf;
     fh.op = wr_.cont ? opcode::cont : wr_opcode_;
     fh.rsv1 = false;
     fh.rsv2 = false;
     fh.rsv3 = false;
     fh.mask = role_ == detail::role_type::client;
-    auto const len = buffer_size(buffers);
+    auto remain = buffer_size(buffers);
     if(compress)
     {
     }
     else if(wr_.autofrag)
     {
-        auto const room = wr_.max - wr_.size;
-        if(! fin && len < room)
+        consuming_buffers<ConstBufferSequence> cb(buffers);
+        do
         {
+            auto const room = wr_.max - wr_.size;
+            if(! fin && remain < room)
+            {
+                buffer_copy(
+                    buffer(wr_.buf.get() + wr_.size, remain), cb);
+                wr_.size += remain;
+                return;
+            }
+            auto const n = detail::clamp(remain, room);
             buffer_copy(
-                buffer(wr_.buf.get() + wr_.size, len), buffers);
-            wr_.size += len;
-            return len;
+                buffer(wr_.buf.get() + wr_.size, n), cb);
+            auto const mb = buffer(wr_.buf.get(), wr_.size + n);
+            if(fh.mask)
+            {
+                fh.key = maskgen_();
+                detail::prepared_key_type key;
+                detail::prepare_key(key, fh.key);
+                detail::mask_inplace(mb, key);
+            }
+            fh.fin = fin && n == remain;
+            fh.len = buffer_size(mb);
+            detail::fh_streambuf fh_buf;
+            detail::write<static_streambuf>(fh_buf, fh);
+            // send header and payload
+            boost::asio::write(stream_,
+                buffer_cat(fh_buf.data(), mb), ec);
+            failed_ = ec != 0;
+            if(failed_)
+                return;
+            remain -= n;
+            cb.consume(n);
+            wr_.size = 0;
+            fh.op = opcode::cont;
         }
-        auto const n = detail::clamp(len, room);
-        buffer_copy(
-            buffer(wr_.buf.get() + wr_.size, n), buffers);
-        auto const mb = buffer(wr_.buf.get(), wr_.size + n);
-        if(fh.mask)
-        {
-            fh.key = maskgen_();
-            detail::prepared_key_type key;
-            detail::prepare_key(key, fh.key);
-            detail::mask_inplace(mb, key);
-        }
-        fh.fin = fin && n == len;
-        fh.len = buffer_size(mb);
+        while(remain > 0);
         wr_.cont = ! fh.fin;
-        detail::write<static_streambuf>(fh_buf, fh);
-        // send header and payload
-        boost::asio::write(stream_,
-            buffer_cat(fh_buf.data(), mb), ec);
-        failed_ = ec != 0;
-        return n;
+        return;
     }
     else if(fh.mask)
     {
-        auto remain = len;
         consuming_buffers<ConstBufferSequence> cb(buffers);
         fh.fin = fin;
-        fh.len = len;
+        fh.len = remain;
         fh.key = maskgen_();
         wr_.cont = ! fh.fin;
+        detail::fh_streambuf fh_buf;
         detail::write<static_streambuf>(fh_buf, fh);
         detail::prepared_key_type key;
         detail::prepare_key(key, fh.key);
@@ -767,16 +763,13 @@ write_frame(bool fin,
             // send header and payload
             boost::asio::write(stream_,
                 buffer_cat(fh_buf.data(), mb), ec);
-            if(ec)
-            {
-                failed_ = ec != 0;
-                return 0;
-            }
+            failed_ = ec != 0;
+            if(failed_)
+                return;
         }
         while(remain > 0)
         {
-            auto const n =
-                detail::clamp(remain, wr_.max);
+            auto const n = detail::clamp(remain, wr_.max);
             auto const mb = buffer(wr_.buf.get(), n);
             buffer_copy(mb, cb);
             cb.consume(n);
@@ -784,23 +777,23 @@ write_frame(bool fin,
             detail::mask_inplace(mb, key);
             // send payload
             boost::asio::write(stream_, mb, ec);
-            if(ec)
-            {
-                failed_ = ec != 0;
-                return 0;
-            }
+            failed_ = ec != 0;
+            if(failed_)
+                return;
         }
-        return len;
+        return;
     }
-    // send header and payload
-    fh.fin = fin;
-    fh.len = len;
-    wr_.cont = ! fh.fin;
-    detail::write<static_streambuf>(fh_buf, fh);
-    boost::asio::write(stream_,
-        buffer_cat(fh_buf.data(), buffers), ec);
-    failed_ = ec != 0;
-    return len;
+    {
+        // send header and payload
+        fh.fin = fin;
+        fh.len = remain;
+        wr_.cont = ! fh.fin;
+        detail::fh_streambuf fh_buf;
+        detail::write<static_streambuf>(fh_buf, fh);
+        boost::asio::write(stream_,
+            buffer_cat(fh_buf.data(), buffers), ec);
+        failed_ = ec != 0;
+    }
 }
 
 template<class NextLayer>
