@@ -1383,6 +1383,9 @@ public:
         static_assert(! std::is_move_assignable<
             stream<socket_type&>>::value, "");
 
+        log << "sizeof(websocket::stream) == " <<
+            sizeof(websocket::stream<boost::asio::ip::tcp::socket&>) << std::endl;
+
         auto const any = endpoint_type{
             address_type::from_string("127.0.0.1"), 0};
 
@@ -1395,13 +1398,13 @@ public:
             {
                 sync_echo_peer server(true, any);
                 auto const ep = server.local_endpoint();
-            
+
                 //testInvokable1(ep);
                 testInvokable2(ep);
                 testInvokable3(ep);
                 testInvokable4(ep);
                 //testInvokable5(ep);
-            
+
                 testSyncClient(ep);
                 testAsyncWriteFrame(ep);
                 yield_to_mf(ep, &stream_test::testAsyncClient);

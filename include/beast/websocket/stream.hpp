@@ -1375,12 +1375,15 @@ public:
     async_write(ConstBufferSequence const& buffers,
         WriteHandler&& handler);
 
-    /** Send a message frame on the stream.
+    /** Write partial message data on the stream.
 
-        This function is used to write a frame to the stream. The
-        call will block until one of the following conditions is true:
+        This function is used to write some or all of a message's
+        payload to the stream. The call will block until one of the
+        following conditions is true:
 
-        @li The entire frame is sent.
+        @li A frame is sent.
+
+        @li Message data is transferred to the write buffer.
 
         @li An error occurs.
 
@@ -1392,44 +1395,58 @@ public:
         the @ref message_type option. The actual payload sent
         may be transformed as per the WebSocket protocol settings.
 
+        The call returns the amount of the input buffer sequence
+        consumed, which may be less than the full size of the input
+        buffers. In this case, the caller is responsible for making
+        additional calls to @ref write_frame to finish the payload.
+
         @param fin `true` if this is the last frame in the message.
 
-        @param buffers One or more buffers containing the frame's
-        payload data.
+        @param buffers The input buffer sequence holding the data to write.
+
+        @return The number of bytes consumed in the input buffers.
 
         @throws boost::system::system_error Thrown on failure.
     */
     template<class ConstBufferSequence>
-    void
+    std::size_t
     write_frame(bool fin, ConstBufferSequence const& buffers);
 
-    /** Send a message frame on the stream.
+    /** Write partial message data on the stream.
 
-        This function is used to write a frame to the stream. The
-        call will block until one of the following conditions is true:
+        This function is used to write some or all of a message's
+        payload to the stream. The call will block until one of the
+        following conditions is true:
 
-        @li The entire frame is sent.
+        @li A frame is sent.
+
+        @li Message data is transferred to the write buffer.
 
         @li An error occurs.
 
         This operation is implemented in terms of one or more calls
-        to the stream's `write_some` function. The actual payload sent
-        may be transformed as per the WebSocket protocol settings.
+        to the stream's `write_some` function.
 
         If this is the beginning of a new message, the message opcode
         will be set to text or binary as per the current setting of
         the @ref message_type option. The actual payload sent
         may be transformed as per the WebSocket protocol settings.
 
+        The call returns the amount of the input buffer sequence
+        consumed, which may be less than the full size of the input
+        buffers. In this case, the caller is responsible for making
+        additional calls to @ref write_frame to finish the payload.
+
         @param fin `true` if this is the last frame in the message.
 
-        @param buffers One or more buffers containing the frame's
-        payload data.
+        @param buffers The input buffer sequence holding the data to write.
 
         @param ec Set to indicate what error occurred, if any.
+
+        @return The number of bytes consumed in the input buffers.
     */
     template<class ConstBufferSequence>
-    void
+    std::size_t
     write_frame(bool fin,
         ConstBufferSequence const& buffers, error_code& ec);
 
