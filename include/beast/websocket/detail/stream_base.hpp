@@ -15,6 +15,7 @@
 #include <beast/websocket/detail/invokable.hpp>
 #include <beast/websocket/detail/mask.hpp>
 #include <beast/websocket/detail/utf8_checker.hpp>
+#include <beast/websocket/detail/zstreams.hpp>
 #include <beast/http/empty_body.hpp>
 #include <beast/http/message.hpp>
 #include <beast/http/string_body.hpp>
@@ -70,58 +71,60 @@ protected:
 
     struct op {};
 
-    detail::maskgen maskgen_;               // source of mask keys
-    decorator_type d_;                      // adorns http messages
-    bool keep_alive_ = false;               // close on failed upgrade
+    detail::maskgen maskgen_;                   // source of mask keys
+    decorator_type d_;                          // adorns http messages
+    bool keep_alive_ = false;                   // close on failed upgrade
     std::size_t rd_msg_max_ =
-        16 * 1024 * 1024;                   // max message size
-    bool wr_autofrag_ = true;               // auto fragment
-    std::size_t wr_buf_size_ = 4096;        // mask buffer size
-    opcode wr_opcode_ = opcode::text;       // outgoing message type
-    pong_cb pong_cb_;                       // pong callback
-    role_type role_;                        // server or client
-    bool failed_;                           // the connection failed
+        16 * 1024 * 1024;                       // max message size
+    bool wr_autofrag_ = true;                   // auto fragment
+    std::size_t wr_buf_size_ = 4096;            // mask buffer size
+    opcode wr_opcode_ = opcode::text;           // outgoing message type
+    pong_cb pong_cb_;                           // pong callback
+    role_type role_;                            // server or client
+    bool failed_;                               // the connection failed
 
-    detail::frame_header rd_fh_;            // current frame header
-    detail::prepared_key_type rd_key_;      // prepared masking key
-    detail::utf8_checker rd_utf8_check_;    // for current text msg
-    std::uint64_t rd_size_;                 // size of the current message so far
-    std::uint64_t rd_need_ = 0;             // bytes left in msg frame payload
-    opcode rd_opcode_;                      // opcode of current msg
-    bool rd_cont_;                          // expecting a continuation frame
+    detail::frame_header rd_fh_;                // current frame header
+    detail::prepared_key_type rd_key_;          // prepared masking key
+    detail::utf8_checker rd_utf8_check_;        // for current text msg
+    std::uint64_t rd_size_;                     // size of the current message so far
+    std::uint64_t rd_need_ = 0;                 // bytes left in msg frame payload
+    opcode rd_opcode_;                          // opcode of current msg
+    bool rd_cont_;                              // expecting a continuation frame
 
-    bool wr_close_;                         // sent close frame
-    op* wr_block_;                          // op currenly writing
+    bool wr_close_;                             // sent close frame
+    op* wr_block_;                              // op currenly writing
 
-    ping_data* pong_data_;                  // where to put pong payload
-    invokable rd_op_;                       // invoked after write completes
-    invokable wr_op_;                       // invoked after read completes
-    close_reason cr_;                       // set from received close frame
+    ping_data* pong_data_;                      // where to put pong payload
+    invokable rd_op_;                           // invoked after write completes
+    invokable wr_op_;                           // invoked after read completes
+    close_reason cr_;                           // set from received close frame
+
+    struct opt_t
+    {
+        bool pmd_enable = true;                 // if pmd extension is enabled
+    };
 
     struct wr_t
     {
-        bool cont;                          // next frame is continuation frame
-        bool autofrag;                      // if this message is auto fragmented
-        bool compress;                      // if this message is compressed
-        std::size_t size;                   // amount stored in buffer
-        std::size_t max;                    // size of write buffer
-        std::unique_ptr<std::uint8_t[]> buf;// write buffer storage
-
-        void
-        open()
-        {
-            cont = false;
-            size = 0;
-        }
-
-        void
-        close()
-        {
-            buf.reset();
-        }
+        bool cont;                              // next frame is continuation frame
+        bool autofrag;                          // if this message is auto fragmented
+        bool compress;                          // if this message is compressed
+        std::size_t size;                       // amount stored in buffer
+        std::size_t max;                        // size of write buffer
+        std::unique_ptr<std::uint8_t[]> buf;    // write buffer storage
     };
 
+    struct pmd_t
+    {
+        bool rd_set;                        // if current read message is compressed
+        bool wr_set;                        // if current write message is compressed
+        zistream zi;
+        zostream zo;
+    };
+
+    opt_t opt_;
     wr_t wr_;
+    std::unique_ptr<pmd_t> pmd_;            // per-message deflate settings
 
     stream_base(stream_base&&) = default;
     stream_base(stream_base const&) = delete;
@@ -176,7 +179,14 @@ open(role_type role)
     wr_block_ = nullptr;    // should be nullptr on close anyway
     pong_data_ = nullptr;   // should be nullptr on close anyway
 
-    wr_.open();
+    if(pmd_)
+    {
+        pmd_->zi.init();
+        pmd_->zo.init();
+    }
+
+    wr_.cont = false;
+    wr_.size = 0;
 }
 
 template<class _>
@@ -184,7 +194,10 @@ void
 stream_base::
 close()
 {
-    wr_.close();
+    wr_.buf.reset();
+
+    if(pmd_)
+        pmd_.reset();
 }
 
 // Read fixed frame header
@@ -233,11 +246,14 @@ read_fh1(DynamicBuffer& db, close_code::value& code)
             // new data frame when continuation expected
             return err(close_code::protocol_error);
         }
-        if(rd_fh_.rsv1 || rd_fh_.rsv2 || rd_fh_.rsv3)
+        if((rd_fh_.rsv1 & ! pmd_) ||
+            rd_fh_.rsv2 || rd_fh_.rsv3)
         {
             // reserved bits not cleared
             return err(close_code::protocol_error);
         }
+        if(pmd_)
+            pmd_->rd_set = rd_fh_.rsv1;
         break;
 
     case opcode::cont:

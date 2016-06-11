@@ -423,6 +423,8 @@ read_frame(frame_info& fi, DynamicBuffer& dynabuf, error_code& ec)
         "SyncStream requirements not met");
     static_assert(beast::is_DynamicBuffer<DynamicBuffer>::value,
         "DynamicBuffer requirements not met");
+    using boost::asio::buffer;
+    using boost::asio::buffer_copy;
     close_code::value code{};
     for(;;)
     {
@@ -500,22 +502,69 @@ read_frame(frame_info& fi, DynamicBuffer& dynabuf, error_code& ec)
                 continue;
             }
         }
-        // read payload
-        auto smb = dynabuf.prepare(
-            detail::clamp(rd_need_));
+        if(! pmd_ || ! pmd_->rd_set)
+        {
+            // read payload
+            auto smb = dynabuf.prepare(
+                detail::clamp(rd_need_));
+            auto const bytes_transferred =
+                stream_.read_some(smb, ec);
+            failed_ = ec != 0;
+            if(failed_)
+                return;
+            rd_need_ -= bytes_transferred;
+            auto const pb = prepare_buffers(
+                bytes_transferred, smb);
+            if(rd_fh_.mask)
+                detail::mask_inplace(pb, rd_key_);
+            if(rd_opcode_ == opcode::text)
+            {
+                if(! rd_utf8_check_.write(pb) ||
+                    (rd_need_ == 0 && rd_fh_.fin &&
+                        ! rd_utf8_check_.finish()))
+                {
+                    code = close_code::bad_payload;
+                    break;
+                }
+            }
+            dynabuf.commit(bytes_transferred);
+            fi.op = rd_opcode_;
+            fi.fin = rd_fh_.fin && rd_need_ == 0;
+            return;
+        }
+        // read compressed payload
+        auto const n = detail::clamp(rd_need_);
+        std::unique_ptr<std::uint8_t[]> buf(
+            new std::uint8_t[n]);
         auto const bytes_transferred =
-            stream_.read_some(smb, ec);
+            stream_.read_some(buffer(buf.get(), n), ec);
         failed_ = ec != 0;
         if(failed_)
             return;
         rd_need_ -= bytes_transferred;
-        auto const pb = prepare_buffers(
-            bytes_transferred, smb);
+        auto const b = buffer(buf.get(), bytes_transferred);
         if(rd_fh_.mask)
-            detail::mask_inplace(pb, rd_key_);
+            detail::mask_inplace(b, rd_key_);
+        auto const n0 = dynabuf.size();
+        if(rd_fh_.fin && rd_need_ == 0)
+        {
+            static std::uint8_t constexpr empty_block[4] =
+                { 0x00, 0x00, 0xff, 0xff };
+            pmd_->zi.write(dynabuf, buffer_cat(b,
+                buffer(empty_block, 4)), ec);
+        }
+        else
+        {
+            pmd_->zi.write(dynabuf, b, ec);
+        }
+        failed_ = ec != 0;
+        if(failed_)
+            return;
         if(rd_opcode_ == opcode::text)
         {
-            if(! rd_utf8_check_.write(pb) ||
+            auto const cb =
+                consumed_buffers(dynabuf.data(), n0);
+            if(! rd_utf8_check_.write(cb) ||
                 (rd_need_ == 0 && rd_fh_.fin &&
                     ! rd_utf8_check_.finish()))
             {
@@ -523,7 +572,6 @@ read_frame(frame_info& fi, DynamicBuffer& dynabuf, error_code& ec)
                 break;
             }
         }
-        dynabuf.commit(bytes_transferred);
         fi.op = rd_opcode_;
         fi.fin = rd_fh_.fin && rd_need_ == 0;
         return;
@@ -909,6 +957,67 @@ build_response(http::request_v1<Body, Headers> const& req)
             return res;
         }
     }
+    std::string sws;
+    if(opt_.pmd_enable)
+    {
+        using beast::detail::ci_equal;
+        http::ext_list list(req.headers["Sec-WebSocket-Extensions"]);
+        for(auto const& ext :
+            http::ext_list{req.headers["Sec-WebSocket-Extensions"]})
+        {
+            if(ci_equal(ext.first, "permessage-deflate"))
+            {
+                bool good = true;
+                bool server_nct = false;
+                bool client_nct = false;
+                std::uint8_t server_bits = 15;
+                std::uint8_t client_bits = 15;
+                for(auto const& param : ext.second)
+                {
+                    if(ci_equal(param.first, "client_no_context_takeover"))
+                    {
+                        if(param.second.empty())
+                            client_nct = true;
+                        else
+                            good = false;
+                    }
+                    else if (ci_equal(param.first, "server_no_context_takeover"))
+                    {
+                        if(param.second.empty())
+                            server_nct = true;
+                        else
+                            good = false;
+                    }
+                    else if (ci_equal(param.first, "client_max_window_bits"))
+                    {
+                        client_bits = static_cast<std::uint8_t>(
+                            std::atoi(std::string{param.second.data(), param.second.size()}.c_str()));
+                        //if(client_bits < 8 || client_bits > 15)
+                        //    good = false;
+                    }
+                    else if (ci_equal(param.first, "server_max_window_bits"))
+                    {
+                        server_bits = static_cast<std::uint8_t>(
+                            std::atoi(std::string{param.second.data(), param.second.size()}.c_str()));
+                        //if(server_bits < 8 || client_bits > 15)
+                        //    good = false;
+                    }
+                    if(! good)
+                        break;
+                }
+                if(good)
+                {
+                    sws = "permessage-deflate; client_no_context_takeover";
+                    pmd_.reset(new pmd_t);
+                }
+                else
+                {
+                    pmd_.reset();
+                }
+                break;
+            }
+        }
+    }
     http::response_v1<http::string_body> res;
     res.status = 101;
     res.reason = http::reason_string(res.status);
@@ -920,7 +1029,9 @@ build_response(http::request_v1<Body, Headers> const& req)
         res.headers.insert("Sec-WebSocket-Accept",
             detail::make_sec_ws_accept(key));
     }
-    res.headers.replace("Server", "Beast.WSProto");
+    if(! sws.empty())
+        res.headers.insert("Sec-WebSocket-Extensions", sws);
+    res.headers.insert("Server", "Beast.WSProto");
     (*d_)(res);
     http::prepare(res, http::connection::upgrade);
     return res;
