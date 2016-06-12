@@ -768,7 +768,7 @@ write_frame(bool fin,
         streambuf sb;
         if(! fh.mask)
         {
-            pmd_->zo.writex(sb, buffers, fin, ec);
+            pmd_->zo.write(sb, buffers, fin, ec);
             failed_ = ec != 0;
             if(failed_)
                 return;
