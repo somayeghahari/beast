@@ -177,7 +177,7 @@ public:
             boost::asio::const_buffer>::value,
                 std::size_t>::type
 #endif
-    write(DynamicBuffer& dynabuf,
+    writex(DynamicBuffer& dynabuf,
         ConstBufferSequence const& buffers, bool fin, error_code& ec)
     {
         static_assert(beast::is_DynamicBuffer<DynamicBuffer>::value,
@@ -189,7 +189,7 @@ public:
         for(auto it = buffers.begin(); it != buffers.end();)
         {
             auto cur = it++;
-            n += write(dynabuf, *cur,
+            n += writex(dynabuf, *cur,
                 fin && it == buffers.end(), ec);
             if(ec)
                 break;
@@ -199,7 +199,7 @@ public:
 
     template<class DynamicBuffer>
     std::size_t
-    write(DynamicBuffer& dynabuf,
+    writex(DynamicBuffer& dynabuf,
         boost::asio::const_buffer in, bool fin, error_code& ec)
     {
         static_assert(beast::is_DynamicBuffer<DynamicBuffer>::value,

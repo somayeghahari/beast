@@ -428,7 +428,7 @@ read_frame(frame_info& fi, DynamicBuffer& dynabuf, error_code& ec)
     close_code::value code{};
     for(;;)
     {
-        if(rd_need_ == 0)
+        if(rd_.need == 0)
         {
             // read header
             detail::frame_streambuf fb;
@@ -438,22 +438,22 @@ read_frame(frame_info& fi, DynamicBuffer& dynabuf, error_code& ec)
                 return;
             if(code != close_code::none)
                 break;
-            if(detail::is_control(rd_fh_.op))
+            if(detail::is_control(rd_.fh.op))
             {
                 // read control payload
-                if(rd_fh_.len > 0)
+                if(rd_.fh.len > 0)
                 {
                     auto const mb = fb.prepare(
-                        static_cast<std::size_t>(rd_fh_.len));
+                        static_cast<std::size_t>(rd_.fh.len));
                     fb.commit(boost::asio::read(stream_, mb, ec));
                     failed_ = ec != 0;
                     if(failed_)
                         return;
-                    if(rd_fh_.mask)
-                        detail::mask_inplace(mb, rd_key_);
-                    fb.commit(static_cast<std::size_t>(rd_fh_.len));
+                    if(rd_.fh.mask)
+                        detail::mask_inplace(mb, rd_.key);
+                    fb.commit(static_cast<std::size_t>(rd_.fh.len));
                 }
-                if(rd_fh_.op == opcode::ping)
+                if(rd_.fh.op == opcode::ping)
                 {
                     ping_data data;
                     detail::read(data, fb.data());
@@ -466,7 +466,7 @@ read_frame(frame_info& fi, DynamicBuffer& dynabuf, error_code& ec)
                         return;
                     continue;
                 }
-                else if(rd_fh_.op == opcode::pong)
+                else if(rd_.fh.op == opcode::pong)
                 {
                     ping_data payload;
                     detail::read(payload, fb.data());
@@ -474,7 +474,7 @@ read_frame(frame_info& fi, DynamicBuffer& dynabuf, error_code& ec)
                         pong_cb_(payload);
                     continue;
                 }
-                assert(rd_fh_.op == opcode::close);
+                assert(rd_.fh.op == opcode::close);
                 {
                     detail::read(cr_, fb.data(), code);
                     if(code != close_code::none)
@@ -496,7 +496,7 @@ read_frame(frame_info& fi, DynamicBuffer& dynabuf, error_code& ec)
                     break;
                 }
             }
-            if(rd_need_ == 0 && ! rd_fh_.fin)
+            if(rd_.need == 0 && ! rd_.fh.fin)
             {
                 // empty frame
                 continue;
@@ -506,47 +506,46 @@ read_frame(frame_info& fi, DynamicBuffer& dynabuf, error_code& ec)
         {
             // read payload
             auto smb = dynabuf.prepare(
-                detail::clamp(rd_need_));
+                detail::clamp(rd_.need));
             auto const bytes_transferred =
                 stream_.read_some(smb, ec);
             failed_ = ec != 0;
             if(failed_)
                 return;
-            rd_need_ -= bytes_transferred;
+            rd_.need -= bytes_transferred;
             auto const pb = prepare_buffers(
                 bytes_transferred, smb);
-            if(rd_fh_.mask)
-                detail::mask_inplace(pb, rd_key_);
-            if(rd_opcode_ == opcode::text)
+            if(rd_.fh.mask)
+                detail::mask_inplace(pb, rd_.key);
+            if(rd_.opc == opcode::text)
             {
-                if(! rd_utf8_check_.write(pb) ||
-                    (rd_need_ == 0 && rd_fh_.fin &&
-                        ! rd_utf8_check_.finish()))
+                if(! rd_.utf8_check.write(pb) ||
+                    (rd_.need == 0 && rd_.fh.fin &&
+                        ! rd_.utf8_check.finish()))
                 {
                     code = close_code::bad_payload;
                     break;
                 }
             }
             dynabuf.commit(bytes_transferred);
-            fi.op = rd_opcode_;
-            fi.fin = rd_fh_.fin && rd_need_ == 0;
+            fi.op = rd_.opc;
+            fi.fin = rd_.fh.fin && rd_.need == 0;
             return;
         }
         // read compressed payload
-        auto const n = detail::clamp(rd_need_);
-        std::unique_ptr<std::uint8_t[]> buf(
-            new std::uint8_t[n]);
+        rd_prepare();
+        auto const n = detail::clamp(rd_.need, rd_.max);
         auto const bytes_transferred =
-            stream_.read_some(buffer(buf.get(), n), ec);
+            stream_.read_some(buffer(rd_.buf.get(), n), ec);
         failed_ = ec != 0;
         if(failed_)
             return;
-        rd_need_ -= bytes_transferred;
-        auto const b = buffer(buf.get(), bytes_transferred);
-        if(rd_fh_.mask)
-            detail::mask_inplace(b, rd_key_);
+        rd_.need -= bytes_transferred;
+        auto const b = buffer(rd_.buf.get(), bytes_transferred);
+        if(rd_.fh.mask)
+            detail::mask_inplace(b, rd_.key);
         auto const n0 = dynabuf.size();
-        if(rd_fh_.fin && rd_need_ == 0)
+        if(rd_.fh.fin && rd_.need == 0)
         {
             static std::uint8_t constexpr empty_block[4] =
                 { 0x00, 0x00, 0xff, 0xff };
@@ -560,20 +559,20 @@ read_frame(frame_info& fi, DynamicBuffer& dynabuf, error_code& ec)
         failed_ = ec != 0;
         if(failed_)
             return;
-        if(rd_opcode_ == opcode::text)
+        if(rd_.opc == opcode::text)
         {
             auto const cb =
                 consumed_buffers(dynabuf.data(), n0);
-            if(! rd_utf8_check_.write(cb) ||
-                (rd_need_ == 0 && rd_fh_.fin &&
-                    ! rd_utf8_check_.finish()))
+            if(! rd_.utf8_check.write(cb) ||
+                (rd_.need == 0 && rd_.fh.fin &&
+                    ! rd_.utf8_check.finish()))
             {
                 code = close_code::bad_payload;
                 break;
             }
         }
-        fi.op = rd_opcode_;
-        fi.fin = rd_fh_.fin && rd_need_ == 0;
+        fi.op = rd_.opc;
+        fi.fin = rd_.fh.fin && rd_.need == 0;
         return;
     }
     if(code != close_code::none)
@@ -734,20 +733,60 @@ write_frame(bool fin,
     using boost::asio::buffer;
     using boost::asio::buffer_copy;
     using boost::asio::buffer_size;
-    bool const compress = false;
-    if(! wr_.cont)
-        wr_prepare(compress);
+    if(! wr_.cont && wr_.size == 0)
+    {
+        // begin message
+        wr_.autofrag = opt_.autofrag;
+        if(pmd_)
+            pmd_->wr_set = opt_.compress;
+        if((pmd_ && pmd_->wr_set) ||
+            wr_.autofrag ||
+            role_ == detail::role_type::client)
+        {
+            if(! wr_.buf || wr_.max != opt_.wr_buf_size)
+            {
+                wr_.max = opt_.wr_buf_size;
+                wr_.buf.reset(new std::uint8_t[wr_.max]);
+            }
+        }
+        else
+        {
+            wr_.max = opt_.wr_buf_size;
+            wr_.buf.reset();
+        }
+    }
     detail::frame_header fh;
-    fh.op = wr_.cont ? opcode::cont : wr_opcode_;
-    fh.rsv1 = false;
+    fh.op = wr_.cont ? opcode::cont : opt_.wr_opc;
     fh.rsv2 = false;
     fh.rsv3 = false;
     fh.mask = role_ == detail::role_type::client;
     auto remain = buffer_size(buffers);
-    if(compress)
+    if(pmd_ && pmd_->wr_set)
     {
+        // compressed
+        fh.rsv1 = ! wr_.cont;
+        streambuf sb;
+        if(! fh.mask)
+        {
+            pmd_->zo.writex(sb, buffers, fin, ec);
+            failed_ = ec != 0;
+            if(failed_)
+                return;
+            fh.fin = fin;
+            fh.len = sb.size();
+            detail::fh_streambuf fh_buf;
+            detail::write<static_streambuf>(fh_buf, fh);
+            // send header and payload
+            boost::asio::write(stream_,
+                buffer_cat(fh_buf.data(), sb.data()), ec);
+            failed_ = ec != 0;
+            return;
+        }
+        //...
+        return;
     }
-    else if(wr_.autofrag)
+    fh.rsv1 = false;
+    if(wr_.autofrag)
     {
         consuming_buffers<ConstBufferSequence> cb(buffers);
         do
@@ -874,8 +913,8 @@ stream<NextLayer>::
 reset()
 {
     failed_ = false;
-    rd_need_ = 0;
-    rd_cont_ = false;
+    rd_.need = 0;
+    rd_.cont = false;
     wr_close_ = false;
     wr_.cont = false;
     wr_block_ = nullptr;    // should be nullptr on close anyway
@@ -883,6 +922,8 @@ reset()
 
     stream_.buffer().consume(
         stream_.buffer().size());
+
+    stream_base::close();
 }
 
 template<class NextLayer>
@@ -921,7 +962,7 @@ build_response(http::request_v1<Body, Headers> const& req)
             res.body = text;
             (*d_)(res);
             prepare(res,
-                (is_keep_alive(req) && keep_alive_) ?
+                (is_keep_alive(req) && opt_.keepalive) ?
                     http::connection::keep_alive :
                     http::connection::close);
             return res;
@@ -951,7 +992,7 @@ build_response(http::request_v1<Body, Headers> const& req)
             res.version = req.version;
             res.headers.insert("Sec-WebSocket-Version", "13");
             prepare(res,
-                (is_keep_alive(req) && keep_alive_) ?
+                (is_keep_alive(req) && opt_.keepalive) ?
                     http::connection::keep_alive :
                     http::connection::close);
             return res;
