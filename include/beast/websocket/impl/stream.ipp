@@ -731,6 +731,7 @@ write_frame(bool fin,
         ConstBufferSequence>::value,
             "ConstBufferSequence requirements not met");
     using boost::asio::buffer;
+    using boost::asio::buffer_cast;
     using boost::asio::buffer_copy;
     using boost::asio::buffer_size;
     if(! wr_.cont && wr_.size == 0)
@@ -764,25 +765,43 @@ write_frame(bool fin,
     if(pmd_ && pmd_->wr_set)
     {
         // compressed
-        fh.rsv1 = ! wr_.cont;
-        streambuf sb;
-        if(! fh.mask)
+        consuming_buffers<ConstBufferSequence> cb(buffers);
+        for(;;)
         {
-            pmd_->zo.write(sb, buffers, fin, ec);
+            auto mb = buffer(
+                wr_.buf.get() + wr_.size, wr_.max - wr_.size);
+            auto const used =
+                pmd_->zo.write(mb, cb, fin, ec);
+            // VFALCO bit of a hack here
+            wr_.size =
+                buffer_cast<std::uint8_t*>(mb) - wr_.buf.get();
             failed_ = ec != 0;
             if(failed_)
                 return;
-            fh.fin = fin;
-            fh.len = sb.size();
-            detail::fh_streambuf fh_buf;
-            detail::write<static_streambuf>(fh_buf, fh);
-            // send header and payload
-            boost::asio::write(stream_,
-                buffer_cat(fh_buf.data(), sb.data()), ec);
-            failed_ = ec != 0;
-            return;
+            cb.consume(used);
+            remain -= used;
+            if(buffer_size(mb) == 0 || fin)
+            {
+                fh.rsv1 = ! wr_.cont;
+                fh.fin = fin && wr_.size < wr_.max;
+                fh.len = wr_.size;
+                detail::fh_streambuf fh_buf;
+                detail::write<static_streambuf>(fh_buf, fh);
+                // send header and payload
+                boost::asio::write(stream_,
+                    buffer_cat(fh_buf.data(),
+                        buffer(wr_.buf.get(), wr_.size)), ec);
+                failed_ = ec != 0;
+                if(failed_)
+                    return;
+                fh.op = opcode::cont;
+                wr_.size = 0;
+            }
+            if(buffer_size(mb) > 0)
+                break;
         }
-        //...
+        assert(remain == 0);
+        wr_.cont = ! fin;
         return;
     }
     fh.rsv1 = false;
@@ -826,7 +845,7 @@ write_frame(bool fin,
             fh.op = opcode::cont;
         }
         while(remain > 0);
-        wr_.cont = ! fh.fin;
+        wr_.cont = ! fin;
         return;
     }
     else if(fh.mask)
