@@ -549,11 +549,13 @@ read_frame(frame_info& fi, DynamicBuffer& dynabuf, error_code& ec)
         {
             static std::uint8_t constexpr empty_block[4] =
                 { 0x00, 0x00, 0xff, 0xff };
+            pmd_->z_i.write_one(b, ec);
             pmd_->zi.write(dynabuf, buffer_cat(b,
                 buffer(empty_block, 4)), ec);
         }
         else
         {
+            pmd_->z_i.write_one(b, ec);
             pmd_->zi.write(dynabuf, b, ec);
         }
         failed_ = ec != 0;

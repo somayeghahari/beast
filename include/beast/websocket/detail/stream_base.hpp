@@ -16,6 +16,7 @@
 #include <beast/websocket/detail/mask.hpp>
 #include <beast/websocket/detail/utf8_checker.hpp>
 #include <beast/websocket/detail/zstreams.hpp>
+#include <beast/core/detail/zcodec.hpp>
 #include <beast/http/empty_body.hpp>
 #include <beast/http/message.hpp>
 #include <beast/http/string_body.hpp>
@@ -124,6 +125,7 @@ protected:
         bool wr_set;                            // if current write message is compressed
         zistream zi;
         zostream zo;
+        beast::detail::z_istream z_i;
     };
 
     opt_t opt_;
